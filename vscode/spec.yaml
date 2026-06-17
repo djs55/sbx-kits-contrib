@@ -1,0 +1,125 @@
+schemaVersion: "1"
+kind: mixin
+name: vscode
+displayName: Visual Studio Code (native, via --display)
+description: |
+  Installs VS Code inside the sandbox and launches it as a Wayland client
+  that renders on the host compositor. Requires `--display` at sandbox
+  creation time — the window appears on your host desktop alongside the
+  agent's terminal session, both sharing the same ephemeral workspace.
+
+  **Prerequisites — `--display` is behind a feature flag:**
+
+      sbx settings set platform.allowExperimentalFeatures true
+      sbx settings set feature.sandbox-display true
+
+  Then create or run with `--display`:
+
+      sbx run claude --display --kit "git+https://github.com/docker/sbx-kits-contrib.git#dir=vscode" ~/my-project
+
+  If you want a browser-accessible VS Code instead (no `--display` needed),
+  use the `code-server` kit.
+
+network:
+  allowedDomains:
+    # Install-time: Microsoft's apt repo (signing key + .deb).
+    - "packages.microsoft.com:443"
+    # Runtime: VS Code's own update / telemetry / download endpoints.
+    - "update.code.visualstudio.com:443"
+    - "vscode.download.prss.microsoft.com:443"
+    # Extensions: marketplace + CDN.
+    - "marketplace.visualstudio.com:443"
+    - "*.vscode-cdn.net:443"
+    - "*.gallerycdn.vsassets.io:443"
+
+commands:
+  install:
+    - command: |
+        set -eu
+
+        # Sandbox virtiofs/apt workaround: route apt's *lists* directory
+        # through tmpfs (/dev/shm) instead of the container's overlay (which
+        # sits on virtiofs in sandboxd). Without this, `apt-get update`
+        # aborts with
+        #   E: Unable to determine file size for fd N - fstat (2: No such file or directory)
+        # when gpgv tries to verify InRelease — the fstat-on-O_TMPFILE
+        # interaction tracked at docker/sailor. /dev/shm is a plain tmpfs
+        # and does not exhibit the issue. We leave the .deb cache at its
+        # default (/var/cache/apt/archives on the overlay) because /dev/shm's
+        # 64 MiB ceiling is too small for the package set, and only the
+        # InRelease verification path tickles the bug.
+        mkdir -p /dev/shm/apt-lists
+        APT_OPTS="-o DPkg::Lock::Timeout=600 -o Dir::State::Lists=/dev/shm/apt-lists"
+        export TMPDIR=/dev/shm
+
+        # Step 1: prerequisites for adding a third-party apt source.
+        apt-get $APT_OPTS update
+        apt-get $APT_OPTS install -yy --no-install-recommends ca-certificates curl gnupg
+
+        # Step 2: trust Microsoft's signing key + register the VS Code apt source.
+        install -d -m 0755 /usr/share/keyrings
+        curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+            | gpg --dearmor > /usr/share/keyrings/packages.microsoft.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+            > /etc/apt/sources.list.d/vscode.list
+
+        # Step 3: install Code + dbus-x11 (provides dbus-run-session, which
+        # Electron needs to wire its IPC bus when no session bus is already
+        # exported into the container).
+        apt-get $APT_OPTS update
+        apt-get $APT_OPTS install -yy --no-install-recommends code dbus-x11
+
+        # Clean up: drop apt's tmpfs lists and the on-overlay .deb cache;
+        # installed packages stay on the container's overlay untouched.
+        rm -rf /dev/shm/apt-lists
+        apt-get clean
+      user: "root"
+      description: |
+        Install Visual Studio Code from Microsoft's official APT repository,
+        plus dbus-x11 (for the dbus-run-session wrapper used at startup).
+        Routes apt's working files through tmpfs to survive sandboxd's
+        virtiofs+apt tempfile interaction.
+
+  startup:
+    - command:
+        - "sh"
+        - "-c"
+        - |
+          # Resolve uid 1000's username + home from /etc/passwd. Different
+          # base templates use different names at uid 1000: the standard
+          # docker/sandbox-templates ship `agent`, others may differ.
+          # Looking up by uid keeps the kit portable across all of them.
+          HOME_DIR=$(getent passwd 1000 | cut -d: -f6)
+          : "${HOME_DIR:?vscode kit: no user at uid 1000; cannot launch VS Code unprivileged}"
+          exec setpriv --reuid=1000 --regid=1000 --init-groups \
+            env HOME="$HOME_DIR" \
+            dbus-run-session /usr/share/code/code \
+              --ozone-platform=wayland \
+              --disable-gpu \
+              --disable-gpu-compositing \
+              --no-sandbox \
+              --disable-dev-shm-usage \
+              --user-data-dir="$HOME_DIR/.vscode-user" \
+              "${WORKSPACE_DIR:-$HOME_DIR}"
+      user: "root"
+      background: true
+      description: |
+        Launch VS Code as a Wayland client opening the sandbox's workspace.
+        Runs as root then drops to uid 1000 via setpriv so the kit works on
+        any template where uid 1000 is the unprivileged user. The window
+        appears on the host compositor via docker-next's display surface
+        (`--display` must have been set at `sbx run`/`sbx create` time).
+        Backgrounded so the agent's interactive terminal keeps focus.
+
+memory: |
+  ## VS Code
+
+  VS Code is running inside this sandbox. Its window is visible on the
+  host desktop — it opened the sandbox workspace on startup, so any
+  file you create or edit in the terminal is immediately visible in the
+  editor, and vice versa.
+
+  If the VS Code window is not visible, check that `--display` was
+  passed at sandbox creation time and that the host compositor is
+  running. The process runs backgrounded; it does not produce a log
+  file by default.
