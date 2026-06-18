@@ -25,7 +25,7 @@ $ sbx settings set feature.sandbox-display true
 ```console
 $ sbx run claude \
     --display \
-    --kit "git+https://github.com/docker/sbx-kits-contrib.git#dir=vscode" \
+    --kit "git+https://github.com/djs55/sbx-kits-contrib.git#ref=624b3d86881a1b013583126cc530db4a0beed807&dir=vscode" \
     ~/my-project
 ```
 
@@ -36,7 +36,7 @@ you passed.
 You can use any agent that accepts `--kit`:
 
 ```console
-$ sbx run shell --display --kit "git+https://github.com/docker/sbx-kits-contrib.git#dir=vscode" ~/my-project
+$ sbx run shell --display --kit "git+https://github.com/djs55/sbx-kits-contrib.git#ref=624b3d86881a1b013583126cc530db4a0beed807&dir=vscode" ~/my-project
 ```
 
 ## First install
