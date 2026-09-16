@@ -47,14 +47,23 @@ setup:
     - command: |
         set -euo pipefail
 
-        # apt's InRelease verification uses O_TMPFILE, which is incompatible
-        # with the virtiofs overlay backing the container. Route the lists
-        # directory through /dev/shm (a plain tmpfs) instead. The .deb cache
-        # stays at its default location (/var/cache/apt/archives) because
-        # /dev/shm's 64 MiB ceiling is too small for the full package set.
-        mkdir -p /dev/shm/apt-lists
-        APT_OPTS="-o DPkg::Lock::Timeout=600 -o Dir::State::Lists=/dev/shm/apt-lists"
-        export TMPDIR=/dev/shm
+        # Keep apt's state at its defaults. An earlier version of this kit
+        # redirected Dir::State::Lists to /dev/shm, which is a 64 MiB tmpfs:
+        # the base template's sources (main/universe/restricted/multiverse
+        # across resolute, -updates, -backports and -security) peak at ~59 MiB
+        # of index while apt recompresses each Packages file to .lz4 alongside
+        # the still-downloading ones in partial/. Once Ubuntu's metadata grew
+        # past that margin, apt hit ENOSPC, retried each failed index with a
+        # different compression variant, and finally fell back to the plain
+        # uncompressed Packages path — which Ubuntu does not publish, so the
+        # 404 made `apt-get update` exit 100 and the kit install fail. The
+        # container's root overlay has ~19 GiB free and supports O_TMPFILE,
+        # so there is nothing to work around here.
+        #
+        # DPkg::Lock::Timeout is kept: the base template registers its own
+        # `apt-get update` startup hook, which can hold the lock when this
+        # install hook runs.
+        APT_OPTS="-o DPkg::Lock::Timeout=600"
 
         apt-get $APT_OPTS update
         apt-get $APT_OPTS install -yy --no-install-recommends ca-certificates curl gnupg
@@ -68,7 +77,6 @@ setup:
         apt-get $APT_OPTS update
         apt-get $APT_OPTS install -yy --no-install-recommends code dbus-x11
 
-        rm -rf /dev/shm/apt-lists
         apt-get clean
       user: "0"
       description: |
