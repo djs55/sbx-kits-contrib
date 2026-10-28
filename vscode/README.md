@@ -14,9 +14,9 @@ visible to the agent.
 
 ## Prerequisites
 
-**sbx v0.39.0 or later** is required. Earlier versions set `WAYLAND_DISPLAY`
-container-wide in a way that caused the clipboard bridge to clobber the
-compositor socket, so VS Code never mapped a window.
+This is a **v3 kit**. Use an `sbx` build that supports v3 kits and the
+experimental `--display` option. Compose it with a v3 agent kit, such as the
+published `claude` or `shell` kit. A v1/v2 kit cannot be mixed with a v3 kit.
 
 VS Code renders to the host compositor via `--display`, which requires enabling
 a feature flag:
@@ -28,10 +28,21 @@ $ sbx settings set feature.sandbox-display true
 
 ## Usage
 
+From a checkout containing this kit:
+
 ```console
 $ sbx run claude \
     --display \
-    --kit "git+https://github.com/docker/sbx-kits-contrib.git#dir=vscode" \
+    --kit ./vscode \
+    ~/my-project
+```
+
+To load it directly from Git, replace `<commit-sha>` with the full 40-character
+SHA of a commit containing this v3 kit:
+
+```console
+$ sbx run claude --display \
+    --kit "git+https://github.com/docker/sbx-kits-contrib.git#ref=<commit-sha>&dir=vscode" \
     ~/my-project
 ```
 
@@ -42,15 +53,18 @@ you passed.
 You can use any agent that accepts `--kit`:
 
 ```console
-$ sbx run shell --display --kit "git+https://github.com/docker/sbx-kits-contrib.git#dir=vscode" ~/my-project
+$ sbx run shell --display --kit ./vscode ~/my-project
 ```
 
 ## First install
 
 On the first `sbx run`/`sbx create` with this kit, VS Code is downloaded and
-installed from Microsoft's apt repository inside the sandbox. This takes roughly
-30–60 seconds depending on network speed. Subsequent starts reuse the installed
-binary from the sandbox's persistent overlay.
+installed from Microsoft's apt repository inside the sandbox. Subsequent starts
+reuse the installed binary from the sandbox's persistent overlay.
+
+The v3 descriptor declares network access, agent instructions and lifecycle
+hooks as capabilities. The startup hook explicitly inherits `WORKSPACE_DIR`
+and `PATH` so the editor opens the mounted workspace.
 
 ## How the display surface works
 
@@ -75,7 +89,7 @@ Check that you passed `--display` to `sbx run`/`sbx create` and that
 $ sbx settings get feature.sandbox-display
 ```
 
-Also check that sbx is v0.39.0 or later (`sbx version`).
+Also check that your `sbx` build supports v3 kits and `--display`.
 
 **VS Code window was closed — how to reopen it**
 
